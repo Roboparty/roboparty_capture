@@ -44,3 +44,6 @@ Thumbs.db
 /.local/
 /sample_output/
 /Log/
+
+# Session metadata and recordings
+/recordings/

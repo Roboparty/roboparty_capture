@@ -1,0 +1,23 @@
+/**:
+  ros__parameters:
+    output_dir: recordings
+    topics:
+      - /ego/left/image/compressed
+      - /ego/right/image/compressed
+      - /ego/imu
+      - /tracking/current_reference
+      - /joint_states
+      - /imu
+      - /action
+    topic_prefix: ""
+    task: ""
+    mock: false
+    # Native rosbag2 double buffer; memory may reach twice this value plus overhead.
+    max_cache_size: 67108864
+    max_bag_size: 0
+    max_bag_duration: 0
+    start_timeout: 15.0
+    stop_timeout: 30.0
+    qos_overrides_file: ""
+    metadata_file: ""
+    # storage_config_file defaults to the installed config/mcap.yaml.

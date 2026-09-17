@@ -1,0 +1,9 @@
+# Unique per B press; reuse this value when retrying a timed-out request.
+string request_id
+string task
+---
+bool success
+string request_id
+string session_id
+string path
+string error

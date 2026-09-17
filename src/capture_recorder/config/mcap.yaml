@@ -1,0 +1,7 @@
+# JPEG images are already compressed. Preserve indexes for offline time/topic reads.
+compression: "None"
+chunkSize: 786432
+noChunking: false
+noMessageIndex: false
+noSummary: false
+noChunkCRC: false

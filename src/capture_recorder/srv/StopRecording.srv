@@ -1,0 +1,9 @@
+# Supply session_id, or request_id while start is still pending.
+string session_id
+string request_id
+---
+bool success
+string request_id
+string session_id
+string path
+string error
