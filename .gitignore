@@ -1,0 +1,46 @@
+# ROS 2 / colcon generated files
+build/
+install/
+log/
+.colcon/
+.ros/
+
+# Python generated files and virtual environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# ROS bag recordings
+rosbag2_*/
+*.bag
+*.bag.active
+*.db3
+*.db3-shm
+*.db3-wal
+*.mcap
+
+# Editor and OS temporary files
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Local data collection materials
+/数采资料/
+
+# Local vendor SDKs and acquisition smoke-test output
+/.local/
+/sample_output/
+/Log/

@@ -1,0 +1,11 @@
+/**:
+  ros__parameters:
+    backend: orbbec
+    serial: ""
+    width: 1600
+    height: 1300
+    fps: 30
+    imu_rate: 1000
+    imu_sync_tolerance_us: 0
+    frame_prefix: ego_
+    queue_capacity: 256

@@ -1,0 +1,13 @@
+{
+  "version": "2.9.0",
+  "platforms": {
+    "x86_64": {
+      "directory": "OrbbecSDK_v2.9.0_202608070728_75392ad_linux_x86_64",
+      "sha256": "7c2412c746e5b8462577d1aab971f79a4d6697f4d5396160435d2c6b81bfb8ad"
+    },
+    "aarch64": {
+      "directory": "OrbbecSDK_v2.9.0_202608070730_75392ad_linux_arm64",
+      "sha256": "dcb17ed110d02d4aba09c5494273b26693def39c331c7b8bd9b313b18bdefadc"
+    }
+  }
+}
