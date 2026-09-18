@@ -27,10 +27,27 @@ sudo apt install python3-colcon-common-extensions libopencv-dev python3-numpy py
 录制包还需要 Humble 的接口生成工具与 rosbag2（Python、MCAP 插件和命令行）：
 
 ```bash
-sudo apt install ros-humble-rosidl-default-generators ros-humble-rosbag2 ros-humble-ros2bag ros-humble-rosbag2-storage-mcap python3-yaml
+sudo apt install ros-humble-rosidl-default-generators ros-humble-rosbag2 ros-humble-ros2bag ros-humble-mcap-vendor ros-humble-rosbag2-storage-mcap python3-yaml
 ```
 
-录制由原生 `ros2 bag record` 执行。本机验证的 Humble rosbag2 版本为 0.15.17，MCAP 插件必须安装；缺少时启动会明确报错。
+MCAP 录制需要两个包：`ros-humble-mcap-vendor`（MCAP 库）和 `ros-humble-rosbag2-storage-mcap`（rosbag2 存储插件）。在线 apt 安装插件时会自动安装 vendor 依赖；仅安装 EGO SDK 不会安装它们。安装后检查：
+
+```bash
+source /opt/ros/humble/setup.bash
+/usr/bin/python3 -c "import rosbag2_py; print(rosbag2_py.get_registered_writers())"
+```
+
+输出必须包含 `mcap`。若仍缺少，先用 `dpkg-query -W ros-humble-mcap-vendor ros-humble-rosbag2-storage-mcap` 检查安装状态，再核对当前 ROS 环境。安装计划中的 `newly installed` 不代表安装已完成。
+
+板端无法联网时，可在联网机器下载对应 Ubuntu 22.04 / Humble、**arm64** 的这两个 `.deb`，核对软件源签名与包校验值后复制到板端的专用目录。不要把本机 amd64 包用于 ARM64。在仅包含这两个安装包的目录执行：
+
+```bash
+sudo dpkg -i ./*.deb
+```
+
+这适用于其他依赖已经满足的情况；如提示缺少其他依赖，需一并准备对应架构的软件包。安装完成后重新运行上面的插件检查，并重启录制管理节点。安装依赖本身不需要重新编译项目。
+
+录制由原生 `ros2 bag record` 执行。命令按板端 Humble rosbag2 0.15.16 的接口生成，不传 `--node-name`，统一使用默认节点名 `rosbag2_recorder` 并按该名称匹配就绪日志。升级 MCAP 插件不会增加 CLI 参数。
 
 克隆项目后进入仓库根目录。下面所有 `./scripts/...` 命令均在该目录运行。建议使用未激活 Conda 的终端，避免 Python 和动态库冲突。
 
@@ -203,9 +220,32 @@ recordings/raw/<session_id>/
 └── bag/             # .mcap 文件和 rosbag2 metadata.yaml，可有多个分文件
 ```
 
-时区固定为 `Asia/Shanghai`，元信息保留 `+0800` 偏移和系统纳秒时间；开始后目录名保持不变，修改任务描述或结果不自动改名。内部 ROS recorder 节点使用独立的 ASCII 随机名称，不含中文任务名。访问中文路径时给路径加引号。参考 layout、原始 header 等仍在原始消息中。关节单位、标定、机器人/策略版本可通过补充 JSON 保存；缺失信息不自动猜测，实际关节名称可从 bag 的 JointState.name 读取。
+时区固定为 `Asia/Shanghai`，元信息保留 `+0800` 偏移和系统纳秒时间；开始后目录名保持不变，修改任务描述或结果不自动改名。内部 ROS recorder 统一使用默认节点名 `rosbag2_recorder`，不含中文任务名。访问中文路径时给路径加引号。参考 layout、原始 header 等仍在原始消息中。关节单位、标定、机器人/策略版本可通过补充 JSON 保存；缺失信息不自动猜测，实际关节名称可从 bag 的 JointState.name 读取。
 
 先调用 stop 再 Ctrl+C 关闭 launch。直接关闭管理节点会尽力停止原生 recorder 并收尾，但标记 `incomplete`。强制杀管理节点或断电不保证文件可恢复，且原生子进程可能继续运行；应检查本段日志和进程，不能只看旧状态判断已停止。已有 `.db3` 和 `.mcap` 数据不会被改名、转换或删除。
+
+## 一条命令启动 EGO 与录制管理
+
+完成依赖和 SDK 安装后构建，在同一个终端启动真实 EGO 和录制管理：
+
+```bash
+./scripts/build.sh
+source install/hardware/setup.bash
+ros2 launch capture_recorder ego_recording.launch.py
+```
+
+默认只录制 EGO 的左右图像与 IMU 三路，保存根目录为 `recordings/raw`。此命令启动驱动和管理服务，**不会自动开始录制**；另一个已加载同一环境的终端调用 `/recording/start` 和 `/recording/stop`，命令同上。先 stop 等待保存完成，再 Ctrl+C 退出组合启动。不要同时重复启动 EGO 驱动。
+
+可分别指定相机配置、录制配置、话题预设和输出目录：
+
+```bash
+ros2 launch capture_recorder ego_recording.launch.py \
+  ego_config:="$PWD/src/ego_driver/config/ego.yaml" \
+  config:="$PWD/src/capture_recorder/config/recorder.yaml" \
+  preset:=ego output_dir:="$PWD/recordings/raw"
+```
+
+EGO 固定使用 `/ego` 命名空间。选择其他预设时，本入口仍只启动 EGO 和录制管理，其他数据源需自行启动。所有终端的 ROS domain 和网络配置应保持一致。
 
 ## 录制真实话题与 YAML 配置
 

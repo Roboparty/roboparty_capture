@@ -91,7 +91,8 @@ class Recorder(Node):
         if self.get_parameter('use_sim_time').value:
             raise ValueError('use_sim_time is not supported')
         if 'mcap' not in rosbag2_py.get_registered_writers():
-            raise RuntimeError('MCAP plugin missing: install ros-humble-rosbag2-storage-mcap')
+            raise RuntimeError('MCAP plugin unavailable: install ros-humble-mcap-vendor '
+                'and ros-humble-rosbag2-storage-mcap, then source the ROS environment')
         for key in ('max_cache_size', 'max_bag_size', 'max_bag_duration'):
             if self.config[key] < 0:
                 raise ValueError(key + ' must be non-negative')
@@ -165,7 +166,7 @@ class Recorder(Node):
                     name = slug + '_' + local.strftime('%Y%m%d_%H%M%S_') + token
                     path = Path(self.config['output_dir']).expanduser().resolve() / name
                     metadata = dict(schema_version=4, session_id=name, request_id=request.request_id,
-                        task_slug=slug, recorder_node_name='bag_' + uuid.uuid4().hex,
+                        task_slug=slug, recorder_node_name='rosbag2_recorder',
                         task=task, result='unlabeled', status='starting',
                         timezone='Asia/Shanghai', utc_offset='+0800', local_start_time=local.isoformat(),
                         start_time_ns=time.time_ns(), recording_ready_time_ns=None, stop_time_ns=None,
@@ -241,7 +242,7 @@ class Recorder(Node):
             atomic_json(session.path / 'session.json', session.metadata)
             atomic_json(session.path / 'config.json', self.config)
             node_name = session.metadata['recorder_node_name']
-            command = ['ros2', 'bag', 'record', '--node-name', node_name,
+            command = ['ros2', 'bag', 'record',
                 '-s', 'mcap', '-o', str(session.path / 'bag'),
                 '--max-cache-size', str(self.config['max_cache_size']),
                 '--max-bag-size', str(self.config['max_bag_size']),

@@ -76,7 +76,7 @@ EGO 当前话题定义见 [驱动接口说明](ego_driver.md)。
 - 使用原生 `ros2 bag record` 管理话题发现、订阅、缓存、MCAP 写盘与分文件；移除 Python 数据订阅、消息队列和 writer 线程。Python 仅管理进程与 session 生命周期。
 - YAML 配置话题列表、输出目录、原生缓存与分文件参数、MCAP/QoS 配置和任务说明。默认九路可改为任意非空话题列表；缺失或中断话题不阻止开始、不自动停止，结束后报告未录到的话题。
 - 每段独立目录：`任务名_北京时间YYYYMMDD_HHMMSS_2位十六进制后缀`。session_id 与目录一致，task 用于目录命名，结果不放进目录名；保存 Asia/Shanghai 时区、UTC 偏移、原始纳秒时间及实际配置快照。
-- task 优先采用 start 请求，空白时回退 YAML，再缺省为“未命名”；目录标签做 NFKC 规范化，保留字母/数字/连字符/下划线，其余字符替换为下划线并合并，截取 40 字符并移除首尾分隔符。session.json 保存 task 与清理后的 task_slug；start 请求仅保留 request_id 和 task，不再区分 task_name 与详细任务说明。内部 recorder 节点名使用独立 ASCII 随机 ID。旧目录不改名。
+- task 优先采用 start 请求，空白时回退 YAML，再缺省为“未命名”；目录标签做 NFKC 规范化，保留字母/数字/连字符/下划线，其余字符替换为下划线并合并，截取 40 字符并移除首尾分隔符。session.json 保存 task 与清理后的 task_slug；start 请求仅保留 request_id 和 task，不再区分 task_name 与详细任务说明。内部 recorder 统一使用默认节点名 `rosbag2_recorder`。旧目录不改名。
 - 每段包含 session.json、bag/、recorder.log 和存储/QoS 配置副本。正常退出且 bag 元信息可读取后报告 saved；缺失话题独立列出，不把 saved 宣称为数据完整或零丢包。版本、单位、标定等由补充元信息提供，不虚构。
 
 ## B/Y 与控制服务
@@ -191,3 +191,18 @@ EGO 当前话题定义见 [驱动接口说明](ego_driver.md)。
 - 从用户提供的 SDK 合集中取出两份原始 Linux 压缩包，放入 vendor/ego-sdk/，暂纳入 Git；合计约 19 MiB，SHA256 与现有清单完全一致。未重新打包，不包含 Viewer。
 - setup_sdk.py 无参数时按本机架构选择仓库归档；--archive 仍可指定外部文件，--print-root 行为不变。两条安装入口均保留哈希、解压路径与 ELF 架构检查，解压产物继续留在被忽略的 .local/ 下。
 - 两个平台的归档均在临时目录完成全新解压、ELF 架构检查和重复安装检查；错误架构归档被哈希校验拒绝。本机默认安装与路径查询通过，x86_64 hardware 构建通过。ARM64 仅验证归档安装，不代表板端编译或运行通过；未进行真机取数。
+
+
+## rosbag2 CLI 兼容与 MCAP 依赖（2026-09-18）
+
+- RP1 实际环境为 Ubuntu 22.04 / ARM64 / Humble，ros2bag、rosbag2_py、transport 为 0.15.16；安装的 mcap_vendor 与 rosbag2_storage_mcap 为 0.15.17。MCAP 插件注册成功不表示 CLI 支持 `--node-name`，板端旧 CLI 因该参数直接退出。
+- 统一按板端 0.15.16 CLI 生成命令，不传 `--node-name`，不做能力探测或版本分支；元信息与 Recording... 就绪标记均使用默认 `rosbag2_recorder`。每段仍有独立进程和日志，停止通过本段进程组执行，不依靠节点名定位进程。
+- README 明确两个 MCAP 包、插件注册检查和 ARM64 离线安装步骤；普通项目脚本不自动 sudo。
+- 此前板端 hardware 构建和 EGO 三路短时取数通过，USB-A 连接为 480 Mbps；原生 CLI 的约 8.96 秒 MCAP 包有左图 269 帧、右图 270 帧、IMU 8940 条。这些不代表持续性能或同步验证，也不代表修复后的管理服务已在板端验收。
+- 本机 mock 构建通过；统一命令在独立 domain、临时目录中完成中文任务的开始、重复开始去重、空 ID 停止和 MCAP 收尾。逐条读取左图 60 帧、右图 60 帧、IMU 1380 条，计数与 session 一致；命令不含 `--node-name`，元信息节点名为 `rosbag2_recorder`。本机运行环境仍为 0.15.17，修改尚未部署到板端做 0.15.16 管理服务验收。
+
+## EGO 与录制管理组合启动（2026-09-18）
+
+- 新增 `ego_recording.launch.py`，复用 EGO 和普通录制 launch，默认 `preset:=ego`、EGO 命名空间 `/ego`。`ego_config` 与录制 `config` 分别传递，并用独立 launch scope 防止同名配置参数互相覆盖；`output_dir` 沿用普通录制入口的覆盖规则。
+- 启动后等待 start 服务，不自动录制；stop 服务完成保存后再退出 launch。其他预设可选，但本入口不启动机器人或其他数据源。
+- mock 构建通过；本机独立 domain 中给组合入口传入临时 mock 相机配置与录制配置，验证默认 ego 预设、输出目录覆盖、中文任务 start、重复 start、stop 和正常退出。逐条读取 MCAP，左图 56 帧、右图 56 帧、IMU 1288 条，只有三个 EGO 话题且计数与 session 一致。测试数据明确标记 mock；未进行本次组合入口的板端真机验证。
