@@ -8,6 +8,14 @@ from launch_ros.actions import Node
 
 def start(context):
     parameters = [LaunchConfiguration('config').perform(context)]
+    preset = LaunchConfiguration('preset').perform(context)
+    if preset != 'custom':
+        allowed = ('ego', 'rpq1', 'teleop', 'dexhand', 'ego_rpq1', 'teleop_dexhand', 'all')
+        if preset not in allowed:
+            raise ValueError('Unknown recording preset: ' + preset + '; choose ' + ', '.join(allowed) + ', custom')
+        share = Path(get_package_share_directory('capture_recorder'))
+        parameters.append(str(share / 'config/presets' / (preset + '.yaml')))
+    parameters.append({'preset': preset})
     output = LaunchConfiguration('output_dir').perform(context)
     if output:
         parameters.append({'output_dir': output})
@@ -18,6 +26,8 @@ def generate_launch_description():
     config = str(Path(get_package_share_directory('capture_recorder')) / 'config/recorder.yaml')
     return LaunchDescription([
         DeclareLaunchArgument('config', default_value=config),
+        DeclareLaunchArgument('preset', default_value='all',
+                              description='Topic preset; custom uses topics from config or node defaults'),
         DeclareLaunchArgument('output_dir', default_value='', description='Override YAML output_dir if set'),
         OpaqueFunction(function=start),
     ])

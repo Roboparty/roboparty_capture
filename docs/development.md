@@ -65,7 +65,7 @@ header.stamp 暂用主机接收时间，尚未完成设备时钟映射。IMU 两
 | 机器人自身 IMU | `/imu` | `sensor_msgs/msg/Imu` | RP1 姿态和角速度；当前发布代码未填充有效加速度，与 EGO IMU 分开保存 |
 | 策略关节目标 | `/action` | `sensor_msgs/msg/JointState` | 策略生成的目标关节位置；后续还有控制平滑，不是最终电机下发命令 |
 
-灵巧手反馈本阶段明确不采集；左右手命令也未纳入本次确认的六类范围，若需要录制再单独确认。
+灵巧手反馈本阶段不采集。2026-09-18 扩展纳入左右手命令 `/dexhand_left/cmd`、`/dexhand_right/cmd`，当前全量共九路；类型为 `std_msgs/msg/Int32MultiArray`，每只手 6 个目标编码器计数（0～10000），无 header，不能视作手部实际状态。
 
 每段另保存 session 起止、任务说明、保存结果及异常信息。已有标定可作为附件保存，缺失时明确标记；当前 EGO 标准消息不包含设备原始时间戳或帧号，驱动也没有标定导出功能，不将这些列为已可录制字段。
 
@@ -74,8 +74,9 @@ EGO 当前话题定义见 [驱动接口说明](ego_driver.md)。
 ## 原生录制管理实现
 
 - 使用原生 `ros2 bag record` 管理话题发现、订阅、缓存、MCAP 写盘与分文件；移除 Python 数据订阅、消息队列和 writer 线程。Python 仅管理进程与 session 生命周期。
-- YAML 配置话题列表、输出目录、原生缓存与分文件参数、MCAP/QoS 配置和任务说明。默认七路可改为任意非空话题列表；缺失或中断话题不阻止开始、不自动停止，结束后报告未录到的话题。
-- 每段独立目录：`北京时间 YYYYMMDD_HHMMSS_短ID`。session_id 与目录一致，任务和结果不放进目录名；保存 Asia/Shanghai 时区、UTC 偏移、原始纳秒时间及实际配置快照。
+- YAML 配置话题列表、输出目录、原生缓存与分文件参数、MCAP/QoS 配置和任务说明。默认九路可改为任意非空话题列表；缺失或中断话题不阻止开始、不自动停止，结束后报告未录到的话题。
+- 每段独立目录：`任务名_北京时间YYYYMMDD_HHMMSS_2位十六进制后缀`。session_id 与目录一致，task 用于目录命名，结果不放进目录名；保存 Asia/Shanghai 时区、UTC 偏移、原始纳秒时间及实际配置快照。
+- task 优先采用 start 请求，空白时回退 YAML，再缺省为“未命名”；目录标签做 NFKC 规范化，保留字母/数字/连字符/下划线，其余字符替换为下划线并合并，截取 40 字符并移除首尾分隔符。session.json 保存 task 与清理后的 task_slug；start 请求仅保留 request_id 和 task，不再区分 task_name 与详细任务说明。内部 recorder 节点名使用独立 ASCII 随机 ID。旧目录不改名。
 - 每段包含 session.json、bag/、recorder.log 和存储/QoS 配置副本。正常退出且 bag 元信息可读取后报告 saved；缺失话题独立列出，不把 saved 宣称为数据完整或零丢包。版本、单位、标定等由补充元信息提供，不虚构。
 
 ## B/Y 与控制服务
@@ -83,7 +84,7 @@ EGO 当前话题定义见 [驱动接口说明](ego_driver.md)。
 - teleop B 按上升沿开始，Y 按上升沿结束保存；异步调用 `/recording/start`、`/recording/stop`，订阅 `/recording/status`。本仓库仅实现服务契约，不修改 teleop 或 RP1 手柄行为；A/X 与录制相互独立。
 - start 请求使用 request_id 标识同一次操作；超时重试沿用 ID。当前进程保留近期请求结果，避免同一操作重复创建目录。正常录制中重复开始返回当前 session。
 - Humble 原生 recorder 没有暂停/恢复服务；固定原生日志格式，并在进程存活且收到 `Recording...` 就绪日志后才报告 recording（该日志在 writer 打开和初始话题发现之后输出）。不支持的版本/日志变化会启动超时并停止进程，不盲目宣称成功。Y 在 starting 期间可按 request_id 请求停止；不会在延迟启动完成后继续录制。
-- stop 按 session_id（或启动时的 request_id）匹配，旧请求不停止新 session；重复停止不重复收尾。
+- stop 带 session_id（或启动时的 request_id）时按 ID 匹配，旧请求不停止新 session。两者均空时，在服务处理时绑定当前 session；启动中可取消，保存中等待同一次收尾，无活动 session 时返回成功且 ID/路径/error 为空，不复用上一段结果。空 ID 延迟到达可能停止下一段，teleop 已知 ID 时仍应携带；重复停止不重复收尾。
 - 状态为 idle/starting/recording/saving/error，包含 session/request ID、时长、最后结果和错误。保存中不启动新一段；错误后必须确认旧进程已退出才允许重试。
 - 正常停止发送 SIGINT 并等待原生 recorder 收尾；超时强制退出标记 incomplete。强杀管理节点或断电不保证恢复。元信息写失败也不能报告保存成功。
 
@@ -143,3 +144,39 @@ EGO 当前话题定义见 [驱动接口说明](ego_driver.md)。
 - 通过 YAML 仅选择 /joint_states、设置 task/output_dir 和 1 秒分文件；mock 前缀生效，产生多个 MCAP 文件。Ctrl+C 关闭管理节点时原生 recorder 正常退出，session 标记 incomplete。
 - 本机 Humble recorder 确认没有暂停/恢复服务，因此使用固定日志格式的 Recording... 就绪标记。新版本兼容性需重新验证，启动标记无法识别会超时失败。
 - 验证使用独立 ROS domain 和临时目录，未修改旧录制文件，未新增 tests/。B/Y 物理按键仍需在 teleop 侧接入；回放封装、可视化和数据集导出不在本次实现范围。
+
+## 空 ID 停止验证（2026-09-18）
+
+- mock 构建通过；临时检查覆盖无活动 session、starting/recording/saving、重复停止等待同一结果、等待期间不重新绑定新 session，以及带 ID 的错误匹配/失败结果。
+- 独立 ROS domain 中运行 mock 与原生 recorder，空请求正常停止并返回本段 session ID，MCAP 收尾成功；之后再次空请求返回成功且 ID 为空。旧失败结果不作为空闲 stop 的返回值。
+
+## 历史验证：双任务字段命名（已改为仅 task）
+
+- mock 与 hardware 构建通过（后者仅为 SDK 编译验证）。独立 ROS domain 中实际启动 mock 和原生 recorder，验证中文请求任务名、空白请求回退 YAML、路径分隔符清理、全符号回退“未命名”四种目录均可录制、停止并读取 MCAP。
+- 验证长标签截断至 40 字符、目录位于指定输出根目录、内部节点名仅使用 ASCII；同一 request_id 使用不同任务名重试仍返回原 session，不改目录。详细 task 独立保存。旧录制文件未改动。
+
+## task 字段统一验证（2026-09-18）
+
+- StartRecording 请求仅包含 request_id、task；删除 task_name 参数及元信息字段，session schema_version 为 4。task 去除首尾空白后按请求 → YAML → 未命名回退，task_slug 保存用于目录的安全标签。
+- mock 与 hardware 构建通过，后者仅为编译验证。四段 mock 验证中文 task 覆盖、空白 task 回退 YAML、特殊字符清理、全符号标签回退；MCAP 均可读取，重复 request_id 携带不同 task 不改变原 session 或其 task。
+- 旧 session 文件保持原状；旧客户端需重新加载/构建接口并重启，旧 YAML 将 task_name 改为 task。
+
+## 录制预设与目录（2026-09-18）
+
+- 公共 recorder.yaml 保存录制参数；presets/ 提供 ego、rpq1、teleop、dexhand、ego_rpq1、teleop_dexhand、all 七种话题列表。普通和 mock launch 默认 all，先加载公共配置，再覆盖预设话题；preset:=custom 时保留自定义配置的 topics。非法预设在启动节点前报错。
+- `/action` 属于机器人策略输出，`/tracking/current_reference` 属于身体遥操参考。手部驱动仅订阅左右 cmd；录制到命令不表示驱动已接受或执行。
+- mock 新增左右六维 Int32MultiArray 命令，50 Hz、值域 0～10000、无 header；始终发布九路，预设筛选录制话题，所有模拟数据保持 /mock 前缀。
+- 默认原始数据根目录改为 recordings/raw，后处理输出约定 recordings/dataset。已有数据不迁移，后处理导出仍未实现。预设名与实际配置随 session 保存。
+
+### 预设验证
+
+- mock 与 hardware 构建通过，hardware 仅为真实 SDK 编译验证，未运行真实设备。
+- 独立 ROS domain、临时目录中完成七种预设的短时模拟录制。逐条读取 MCAP，确认仅包含所选话题、无缺失话题、计数与 session 一致；双手命令为六维且在约定值域内，JPEG 可解码为 320×240，身体参考为 35 维。
+- 默认目录确认为 recordings/raw，预设名和最终 /mock 话题列表正确保存；preset:=custom 使用自定义单路手命令及输出目录验证通过。Humble CLI 不接受空 launch 参数值，因此使用显式 custom 入口。
+- 普通和 mock launch 的全部预设参数路径、非法预设拒绝检查通过。未新增 tests/，未修改或迁移旧录制数据；不代表真机或板端吞吐验证。
+
+## 两位目录后缀（2026-09-18）
+
+- 新 session 后缀缩为两位十六进制，随机选起点，碰撞时循环尝试其余候选，最多 256 次。原子 mkdir 成功后才写入元信息，session_id 与实际目录保持一致。
+- 同任务、同一秒的后缀全部占用时明确失败，不读取或修改已有目录的 bag、session.json；旧目录不改名，内部 ROS recorder 节点仍使用完整 UUID。
+- 验证：mock 构建通过；临时检查覆盖重名、ff→00 回绕、并发目录占用、256 个后缀耗尽及已有元信息保护。短时 mock 录制正常保存，MCAP 可读取，目录与 session_id 均为两位后缀。未进行真机测试。

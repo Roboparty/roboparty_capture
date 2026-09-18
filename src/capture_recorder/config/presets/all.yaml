@@ -1,0 +1,12 @@
+/**:
+  ros__parameters:
+    topics:
+    - /ego/left/image/compressed
+    - /ego/right/image/compressed
+    - /ego/imu
+    - /joint_states
+    - /imu
+    - /action
+    - /tracking/current_reference
+    - /dexhand_left/cmd
+    - /dexhand_right/cmd

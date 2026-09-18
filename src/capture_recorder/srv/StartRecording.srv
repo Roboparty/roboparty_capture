@@ -1,5 +1,6 @@
 # Unique per B press; reuse this value when retrying a timed-out request.
 string request_id
+# Task used for the session name; blank uses YAML task, then 未命名.
 string task
 ---
 bool success

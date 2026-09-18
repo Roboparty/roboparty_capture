@@ -1,16 +1,11 @@
 /**:
   ros__parameters:
-    output_dir: recordings
-    topics:
-      - /ego/left/image/compressed
-      - /ego/right/image/compressed
-      - /ego/imu
-      - /tracking/current_reference
-      - /joint_states
-      - /imu
-      - /action
+    # Topic lists: config/presets/*.yaml; launch defaults to preset:=all.
+    # To set topics in this file, launch with preset:=custom.
+    output_dir: recordings/raw
     topic_prefix: ""
-    task: ""
+    # Short session directory label; start request may override it. Chinese is supported.
+    task: "未命名"
     mock: false
     # Native rosbag2 double buffer; memory may reach twice this value plus overhead.
     max_cache_size: 67108864

@@ -9,6 +9,7 @@ import signal
 import subprocess
 import threading
 import time
+import unicodedata
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -24,7 +25,31 @@ from capture_recorder.msg import RecordingStatus
 from capture_recorder.srv import StartRecording, StopRecording
 
 TOPICS = ['/ego/left/image/compressed', '/ego/right/image/compressed', '/ego/imu',
-          '/tracking/current_reference', '/joint_states', '/imu', '/action']
+          '/joint_states', '/imu', '/action', '/tracking/current_reference',
+          '/dexhand_left/cmd', '/dexhand_right/cmd']
+
+
+def task_slug(value):
+    """A short, single path component; retain Unicode letters and numbers."""
+    normalized = unicodedata.normalize('NFKC', value)
+    cleaned = ''.join(c if c.isalnum() or c in '-_' else '_' for c in normalized)
+    cleaned = '_'.join(part for part in cleaned.split('_') if part)
+    return cleaned[:40].strip('-_') or '未命名'
+
+
+def reserve_session_directory(path):
+    """Atomically reserve a two-hex-digit suffix, trying each candidate once."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prefix, token = path.name.rsplit('_', 1)
+    first = int(token, 16)
+    for offset in range(256):
+        candidate = path.with_name(f'{prefix}_{(first + offset) % 256:02x}')
+        try:
+            candidate.mkdir(exist_ok=False)
+        except FileExistsError:
+            continue
+        return candidate
+    raise FileExistsError('All 256 session suffixes are occupied for this task and second; retry later')
 
 
 def atomic_json(path, value):
@@ -58,7 +83,7 @@ class Recorder(Node):
     def __init__(self):
         super().__init__('recorder')
         share = Path(get_package_share_directory('capture_recorder'))
-        defaults = dict(output_dir='recordings', topics=TOPICS, topic_prefix='', task='', mock=False,
+        defaults = dict(output_dir='recordings/raw', preset='', topics=TOPICS, topic_prefix='', task='未命名', mock=False,
             max_cache_size=64*1024*1024, max_bag_size=0, max_bag_duration=0,
             storage_config_file=str(share / 'config/mcap.yaml'), qos_overrides_file='',
             metadata_file='', start_timeout=15.0, stop_timeout=30.0)
@@ -134,10 +159,14 @@ class Recorder(Node):
                     session = self.active
                 else:
                     local = datetime.datetime.now(ZoneInfo('Asia/Shanghai'))
-                    name = local.strftime('%Y%m%d_%H%M%S_') + uuid.uuid4().hex[:8]
+                    task = request.task.strip() or self.config['task'].strip() or '未命名'
+                    slug = task_slug(task)
+                    token = uuid.uuid4().hex[:2]
+                    name = slug + '_' + local.strftime('%Y%m%d_%H%M%S_') + token
                     path = Path(self.config['output_dir']).expanduser().resolve() / name
-                    metadata = dict(schema_version=2, session_id=name, request_id=request.request_id,
-                        task=request.task or self.config['task'], result='unlabeled', status='starting',
+                    metadata = dict(schema_version=4, session_id=name, request_id=request.request_id,
+                        task_slug=slug, recorder_node_name='bag_' + uuid.uuid4().hex,
+                        task=task, result='unlabeled', status='starting',
                         timezone='Asia/Shanghai', utc_offset='+0800', local_start_time=local.isoformat(),
                         start_time_ns=time.time_ns(), recording_ready_time_ns=None, stop_time_ns=None,
                         closed_time_ns=None, mock=self.config['mock'], storage_id='mcap',
@@ -166,6 +195,11 @@ class Recorder(Node):
                     session = None
             elif request.request_id:
                 session = self.requests.get(request.request_id)
+            else:
+                # Bind once under the lock; never retarget a later session while waiting.
+                session = self.active
+                if session is None:
+                    return self.respond(response, None, True)
             if session is None:
                 return self.respond(response, None, False, 'Unknown session_id/request_id')
             if not session.stop_done.done():
@@ -198,11 +232,15 @@ class Recorder(Node):
 
     def run_session(self, session):
         log = None
+        directory_owned = False
         try:
-            session.path.mkdir(parents=True, exist_ok=False)
+            with self.lock:
+                session.path = reserve_session_directory(session.path)
+                directory_owned = True
+                session.metadata['session_id'] = session.path.name
             atomic_json(session.path / 'session.json', session.metadata)
             atomic_json(session.path / 'config.json', self.config)
-            node_name = 'bag_' + session.path.name
+            node_name = session.metadata['recorder_node_name']
             command = ['ros2', 'bag', 'record', '--node-name', node_name,
                 '-s', 'mcap', '-o', str(session.path / 'bag'),
                 '--max-cache-size', str(self.config['max_cache_size']),
@@ -267,6 +305,8 @@ class Recorder(Node):
             if log:
                 log.close()
             try:
+                if not directory_owned:
+                    raise RuntimeError('Session directory was not reserved')
                 info = rosbag2_py.Info().read_metadata(str(session.path / 'bag'), 'mcap')
                 session.counts = {item.topic_metadata.name: item.message_count for item in info.topics_with_message_count}
                 session.metadata['bag_duration_ns'] = info.duration.nanoseconds
@@ -278,7 +318,8 @@ class Recorder(Node):
                 closed_time_ns=time.time_ns(), message_counts=session.counts,
                 missing_topics=[t for t in self.topics if not session.counts.get(t, 0)])
             try:
-                atomic_json(session.path / 'session.json', session.metadata)
+                if directory_owned:
+                    atomic_json(session.path / 'session.json', session.metadata)
             except Exception as exc:
                 session.error = 'Session metadata save failed: ' + str(exc)
                 session.success = False

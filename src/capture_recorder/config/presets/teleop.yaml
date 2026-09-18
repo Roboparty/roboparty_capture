@@ -1,0 +1,4 @@
+/**:
+  ros__parameters:
+    topics:
+    - /tracking/current_reference

@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Synthetic RP1-shaped messages. No hardware access; fixed /mock namespace."""
+"""Synthetic robot, body reference and dexhand command messages. No hardware access; fixed /mock namespace."""
 import math
 import time
 import rclpy
@@ -7,7 +7,7 @@ from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import JointState, Imu
-from std_msgs.msg import Float32MultiArray, MultiArrayDimension
+from std_msgs.msg import Float32MultiArray, Int32MultiArray, MultiArrayDimension
 
 
 class MockRobot(Node):
@@ -18,8 +18,11 @@ class MockRobot(Node):
         self.publishers_by_name = {name: self.create_publisher(cls, '/mock/' + name, qos_profile_sensor_data)
             for name, cls in [('tracking/current_reference', Float32MultiArray),
                               ('joint_states', JointState), ('imu', Imu), ('action', JointState)]}
+        for side in ('left', 'right'):
+            name = f'dexhand_{side}/cmd'
+            self.publishers_by_name[name] = self.create_publisher(Int32MultiArray, '/mock/' + name, 10)
         self.create_timer(0.02, self.tick)
-        self.get_logger().info('Synthetic 28-joint data at 50 Hz under /mock only')
+        self.get_logger().info('Synthetic body and six-position hand commands at 50 Hz under /mock only')
 
     def tick(self):
         t = time.monotonic() - self.origin
@@ -38,6 +41,11 @@ class MockRobot(Node):
                 msg.velocity = [0.1*math.cos(t-lag+i*0.1) for i in range(28)]
                 msg.effort = [0.]*28
             self.publishers_by_name[name].publish(msg)
+        for side, phase in [('left', 0.), ('right', 1.)]:
+            command = Int32MultiArray()
+            # Encoder counts, not radians; synthetic commands have no header timestamp.
+            command.data = [int(5000 + 4000 * math.sin(t + phase + i * 0.2)) for i in range(6)]
+            self.publishers_by_name[f'dexhand_{side}/cmd'].publish(command)
         imu = Imu()
         imu.header.stamp = stamp
         imu.orientation.w = 1.

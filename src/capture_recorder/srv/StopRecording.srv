@@ -1,4 +1,5 @@
 # Supply session_id, or request_id while start is still pending.
+# Both empty: stop the current session; if none is active, succeed with empty IDs.
 string session_id
 string request_id
 ---
