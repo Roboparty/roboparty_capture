@@ -1,0 +1,10 @@
+# Paths are relative to this configuration file, not the current directory.
+topics_file: presets/teleop_dexhand.yaml
+rate: 1.0
+loop: false
+# Playback and its subscribers must use the same domain.
+ros_domain_id: 174
+# null: read config.topic_prefix from adjacent session.json, otherwise use "".
+# For a standalone mock bag without session.json, explicitly set "/mock".
+# This only selects recorded names; it never remaps them.
+topic_prefix: null

@@ -2,7 +2,7 @@
 
 面向开源机器人的 ROS 2 设备接入与数据采集项目。目前提供 **Orbbec EGO 双目相机和 IMU 的 C++ 驱动**，以及可直接获取图像数组、三轴数值和时间信息的 Python 示例。
 
-驱动可以独立用于机器人实时感知，不需要启动录制。`capture_recorder` 提供九路原始消息录制、session 管理及本机 mock；遥操按钮接入、回放和数据集导出尚未实现。
+驱动可以独立用于机器人实时感知，不需要启动录制。`capture_recorder` 提供九路原始消息录制、session 管理及本机 mock，仓库另提供原始 ROS 数据回放薄封装。遥操按钮接入和数据集导出尚未实现。
 
 ## 支持范围
 
@@ -27,7 +27,7 @@ sudo apt install python3-colcon-common-extensions libopencv-dev python3-numpy py
 录制包还需要 Humble 的接口生成工具与 rosbag2（Python、MCAP 插件和命令行）：
 
 ```bash
-sudo apt install ros-humble-rosidl-default-generators ros-humble-rosbag2 ros-humble-ros2bag ros-humble-rosbag2-storage-mcap
+sudo apt install ros-humble-rosidl-default-generators ros-humble-rosbag2 ros-humble-ros2bag ros-humble-rosbag2-storage-mcap python3-yaml
 ```
 
 录制由原生 `ros2 bag record` 执行。本机验证的 Humble rosbag2 版本为 0.15.17，MCAP 插件必须安装；缺少时启动会明确报错。
@@ -36,22 +36,28 @@ sudo apt install ros-humble-rosidl-default-generators ros-humble-rosbag2 ros-hum
 
 ## 2. 配置 EGO SDK
 
-从设备供应商获取对应平台的 **EGO 配套 OrbbecSDK 2.9.0**，不要用未经验证的通用 Orbbec SDK 替换。当前固定的压缩包为：
+仓库的 [vendor/ego-sdk](vendor/ego-sdk/) 已保存 EGO 配套 **OrbbecSDK 2.9.0** 的两个厂商原始压缩包，暂随 Git 管理：
 
 | 本机架构 | 文件名 |
 | --- | --- |
 | x86_64 | `OrbbecSDK_v2.9.0_202608070728_75392ad_linux_x86_64.tar.gz` |
 | ARM64 / aarch64 | `OrbbecSDK_v2.9.0_202608070730_75392ad_linux_arm64.tar.gz` |
 
-如果取得的是 SDK 合集，先从中取出对应的 `.tar.gz`，再运行：
+在仓库根目录运行，无需手动选择压缩包：
+
+```bash
+/usr/bin/python3 scripts/setup_sdk.py
+```
+
+脚本自动识别本机架构，从 `vendor/ego-sdk/` 选择对应归档，校验 SHA256 和动态库架构，完整解压到 `.local/ego-sdk/2.9.0/<架构>/`。解压产物不进入 Git，也不会安装到系统目录。重复安装同一包可安全执行；错误版本、损坏的包和其他架构的包会被拒绝。
+
+也可显式指定外部厂商归档，仍执行同样的校验：
 
 ```bash
 /usr/bin/python3 scripts/setup_sdk.py --archive /path/to/OrbbecSDK_linux_x86_64.tar.gz
 ```
 
-将示例路径替换为实际文件。脚本自动识别本机架构，校验 SHA256 和动态库架构，完整解压到 `.local/ego-sdk/2.9.0/<架构>/`。重复安装同一包可安全执行；错误版本、损坏的包和其他架构的包会被拒绝。SDK 不进入 Git，也不会安装到系统目录。
-
-脚本不下载或公开分发厂商 SDK，不执行 sudo。固定文件信息见 [SDK 清单](scripts/sdk_manifest.json)。
+脚本不下载、不执行 sudo；缺少仓库归档时明确报错。固定版本与 SHA256 见 [SDK 清单](scripts/sdk_manifest.json)，不要用未经验证的通用 Orbbec SDK 替换。
 
 连接设备前，为 Linux 配置厂商提供的 USB 规则：
 
@@ -255,7 +261,43 @@ ros2 launch capture_recorder recording.launch.py \
 
 升级旧录制实现后需重新构建并重启节点，其他工作区中的旧控制客户端也需使用新版服务定义：start 仅含 request_id 和 task，移除之前的 task_name；旧 YAML 应将 task_name 合并到 task，客户端需重新构建并重启；stop 可用 request_id 取消启动；状态移除 queued_bytes，新增 elapsed_seconds/result/counts_final。旧 queue_bytes、queue_messages、topic_timeout 参数已移除。原生进程在 start 操作期间启动，不再保证订阅在按 B 之前已建立，因此不提供预录，也不保证保存刚按键时尚未订阅的话题消息。
 
-回放继续使用 `ros2 bag play`；独立回放封装、可视化、LeRobot 导出均尚未实现。它们计划作为 capture 离线工具，teleop 只承担参考发布与录制按钮。
+## 原始 ROS 数据回放
+
+在仓库根目录执行，先检查选择结果（不发布消息）：
+
+```bash
+source install/mock/setup.bash  # 真机环境使用 install/hardware/setup.bash
+/usr/bin/python3 scripts/replay_session.py "recordings/raw/<session_id>" --dry-run
+```
+
+确认后去掉 `--dry-run` 播放；也可以传入 session 下的 `bag/` 目录：
+
+```bash
+/usr/bin/python3 scripts/replay_session.py "recordings/raw/<session_id>" \
+  --config src/capture_recorder/config/replay.yaml
+```
+
+[replay.yaml](src/capture_recorder/config/replay.yaml) 默认引用现有 `presets/teleop_dexhand.yaml`，只选择身体参考与左右手命令。**实际播放话题取配置列表与 bag 中有消息的话题的交集**；缺失或零消息话题会提示，其余继续播放，交集为空则非零退出，不回退到全量播放。读取 bag 的 metadata.yaml，不修改原始文件；未正常收尾、缺少元信息的 bag 需先另行检查。
+
+| 配置 | 默认值 | 含义 |
+| --- | --- | --- |
+| `topics_file` | `presets/teleop_dexhand.yaml` | 复用录制预设格式；相对路径基于 replay.yaml 所在目录 |
+| `rate` | 1.0 | 有限正数，播放倍率 |
+| `loop` | false | 是否循环；Ctrl+C 停止 |
+| `ros_domain_id` | 174 | 仅为播放进程设置 domain，覆盖当前环境值；订阅端需相同 |
+| `topic_prefix` | null | 从 bag 同级 session.json 的 config.topic_prefix 读取；无 session 时为空；可显式指定 |
+
+mock session 自动选择 `/mock/` 下的对应话题，原发布名称保持不变。单独拷贝 bag、没有 session.json 时，设置 `topic_prefix: /mock`，或在话题配置中写完整 `/mock/...` 名称。不会自动去掉 mock 前缀，不做话题重映射。
+
+包装脚本打印数据路径、选中/缺失话题及实际命令，然后交给原生 `ros2 bag play`。按 bag 记录时间调度，保留原始消息内容及 header，不重采样、不改写时间戳、不提供动作过渡或控制权切换，也不发布 `/clock`。原生播放器处理键盘、Ctrl+C 和退出状态；QoS 沿用原生播放器规则。
+
+默认 domain 174 用于隔离回放，但该 domain 并非自动保留。如果将其设成真实控制系统使用的 domain，身体参考和双手命令可能被在线控制节点直接接收；必须先停止实时 teleop 对相同入口的发布。原始消息回放不保证机器人运动复现。
+
+## 其他机器上的后处理与可视化
+
+RP1 负责接入与原始录制，回放工具按需运行。后处理、LeRobot 导出和可视化尚未实现，后续在其他机器运行，不纳入板端依赖。完整 session 目录作为交接单位，连同 `bag/`、`session.json`、配置和已有标定附件一起复制。后处理输出放在 `recordings/dataset/<数据集或版本>/`，保留原始 session 不变。
+
+离线工具后续负责查看图像/状态、检查数据、筛选片段、对齐以及构造 observation/action；严格对齐前仍需明确采集时钟映射、单位和标定。部署到其他机器暂不要求拆分仓库。teleop 只承担参考发布与录制按钮。
 
 ## 常见问题
 

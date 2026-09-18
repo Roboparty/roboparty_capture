@@ -17,7 +17,7 @@
 
 ## SDK 与文件管理
 
-- SDK 从用户提供的厂商归档安装，不提交 SDK 二进制、数采资料、日志或采样输出。
+- SDK 从用户提供的厂商归档安装；当前允许 vendor/ego-sdk/ 下两份固定 Linux SDK 原始压缩包纳入 Git，默认从该目录安装。不提交解压后的 SDK、其他数采资料、日志或采样输出。
 - 安装入口为 `/usr/bin/python3 scripts/setup_sdk.py`，版本与 SHA256 在 `scripts/sdk_manifest.json`；不要添加绕过校验的默认路径。
 - 普通安装脚本不自动 sudo、不修改系统目录。USB 规则通过 README 中的显式命令安装。
 - `EGO_SDK_ROOT` 支持外部完整 SDK；更换架构必须使用对应 SDK 并重新编译。

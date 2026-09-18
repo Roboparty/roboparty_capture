@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install a pinned, locally supplied EGO SDK. No downloads or root operations."""
+"""Install the pinned EGO SDK from repository archives or an explicit local archive."""
 import argparse
 import hashlib
 import json
@@ -114,8 +114,9 @@ def install(archive_path, install_dir, arch):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument('--archive', type=Path, help='Vendor Linux .tar.gz for this machine')
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument('--archive', type=Path,
+                        help='Override bundled vendor/ego-sdk archive with a local Linux .tar.gz')
     action.add_argument('--print-root', action='store_true', help='Print validated installed SDK path')
     parser.add_argument('--install-dir', type=Path, default=PROJECT / '.local/ego-sdk')
     args = parser.parse_args()
@@ -125,7 +126,12 @@ def main():
         if args.print_root:
             print(selected_root(folder, arch))
         else:
-            root = install(args.archive.expanduser().resolve(), folder, arch)
+            archive = args.archive or (PROJECT / 'vendor/ego-sdk' /
+                                      (MANIFEST['platforms'][arch]['directory'] + '.tar.gz'))
+            if not archive.expanduser().is_file():
+                raise ValueError(f'SDK archive not found: {archive}. Restore vendor/ego-sdk '
+                                 'or pass --archive /path/to/vendor.tar.gz.')
+            root = install(archive.expanduser().resolve(), folder, arch)
             print(f'SDK ready: {root}\nNext: ./scripts/build.sh')
     except (OSError, ValueError, KeyError, tarfile.TarError) as error:
         print(f'SDK setup failed: {error}', file=sys.stderr)
