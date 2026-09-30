@@ -10,7 +10,7 @@ def start(context):
     parameters = [LaunchConfiguration('config').perform(context)]
     preset = LaunchConfiguration('preset').perform(context)
     if preset != 'custom':
-        allowed = ('ego', 'rpq1', 'teleop', 'dexhand', 'ego_rpq1', 'teleop_dexhand', 'all')
+        allowed = ('ego', 'rpq1', 'teleop', 'dexhand', 'ego_rpq1', 'teleop_dexhand', 'no_ego', 'all')
         if preset not in allowed:
             raise ValueError('Unknown recording preset: ' + preset + '; choose ' + ', '.join(allowed) + ', custom')
         share = Path(get_package_share_directory('capture_recorder'))

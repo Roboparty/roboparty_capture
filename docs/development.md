@@ -2,6 +2,12 @@
 
 面向维护者与编码代理，安装和操作命令见 [README](../README.md)，消息契约见 [驱动接口说明](ego_driver.md)。
 
+## 当前部署环境（2026-09-24）
+
+后续机器人部署目标统一为 Ubuntu 24.04 / ROS 2 Jazzy，README 的依赖、驱动配置与构建命令按此编写。当前 ARM64 机器人已确认安装 rosidl_default_generators、rosbag2、ros2bag、rosbag2_py、rosbag2_transport、mcap_vendor、rosbag2_storage_mcap 和 python3-yaml；实际导入 rosbag2_py 后可发现 mcap 与 sqlite3 插件。此检查不证明这些包全部由镜像预装，也不代表 Jazzy 完整构建、真机取数及录制验收通过。
+
+以下 Humble 记录保留为历史验证事实。Jazzy 还需验证构建、EGO 三路取数，以及管理服务开始、停止、MCAP 收尾，尤其是原生 recorder 的就绪日志识别。
+
 ## 当前架构与决策
 
 一个仓库，包含 `ego_driver` 和 `capture_recorder` 两个 ROS 2 包。C++ 设备适配层通过 `Source` 接口连接 ROS 发布节点；厂商 API 仅在 `orbbec_source.cpp` 内。保留模拟后端供无设备开发，Python 示例负责解码和演示消费方式；capture_recorder 通过子进程管理原生 rosbag2 recorder。
@@ -13,6 +19,8 @@ header.stamp 暂用主机接收时间，尚未完成设备时钟映射。IMU 两
 删除空壳 `setup_sdk.sh`，保留 `setup_sdk.py`、SDK 清单和 `build.sh`。SDK 默认从仓库 vendor/ego-sdk 中的厂商原始归档安装，也支持 --archive 显式路径；两个平台的具体构建和 SHA256 在清单中固定。哈希用于固定收到的包，不等同于厂商签名。按当前约定，两个 Linux 压缩包暂纳入 Git，解压产物仍忽略。安装器不下载、不自动 sudo。
 
 构建目录为 `build/hardware` / `install/hardware` 与 `build/mock` / `install/mock`。在目标机器重新构建，不能复制 x86_64 安装产物到 ARM64。`tests/` 已按要求删除，当前通过临时检查及 README 的取数示例手动验证。
+
+构建入口按 `ROS_SETUP`、`ROS_DISTRO` 对应的标准安装路径、`/opt/ros` 唯一安装的顺序选择环境；没有明确选择且存在多个版本时拒绝猜测。显式指定或当前发行版对应的文件不存在时直接报错，不回退到其他版本。非标准路径通过 `ROS_SETUP` 指定。自动发现仅解决环境入口，不构成 Jazzy 兼容性验证；切换发行版使用独立工作区。
 
 ## 已知问题与验证历史
 
@@ -48,7 +56,7 @@ header.stamp 暂用主机接收时间，尚未完成设备时钟映射。IMU 两
 - 先在 Linux 4090 上开发，用测试话题或录制文件验证，再部署到 RP1 板端调试。
 - RP1 上负责设备接入与原始数据录制；录制结束后可将文件拷回 4090 做后处理和查看。
 - 尽量不修改 RP1 推理项目；`roboparty_teleop` 仅增加录制控制和状态显示。
-- 优先沿用现有 ROS 2 Humble 环境。设备路径、话题、QoS、存储位置等通过配置指定。
+- 新部署统一使用 ROS 2 Jazzy。设备路径、话题、QoS、存储位置等通过配置指定。
 
 ## 采集内容（2026-09-17 已确认）
 
@@ -159,6 +167,10 @@ EGO 当前话题定义见 [驱动接口说明](ego_driver.md)。
 - 旧 session 文件保持原状；旧客户端需重新加载/构建接口并重启，旧 YAML 将 task_name 改为 task。
 
 ## 录制预设与目录（2026-09-18）
+
+后续新增 `no_ego` 预设：选择机器人本体、身体参考和左右手命令六路，保留 `/imu`，排除 EGO 三路。普通和 mock launch 均接受该预设；无 EGO 启动使用 `recording.launch.py`，组合 EGO 入口和 mock 数据源的启动行为不变。
+
+新增预设验证：`./scripts/build.sh --mock` 通过；普通和 mock launch 的 `no_ego` 参数解析通过，YAML 列表确认为 `all` 去除 `ego` 后的六个唯一话题。本次未做实际录制或真机验证。
 
 - 公共 recorder.yaml 保存录制参数；presets/ 提供 ego、rpq1、teleop、dexhand、ego_rpq1、teleop_dexhand、all 七种话题列表。普通和 mock launch 默认 all，先加载公共配置，再覆盖预设话题；preset:=custom 时保留自定义配置的 topics。非法预设在启动节点前报错。
 - `/action` 属于机器人策略输出，`/tracking/current_reference` 属于身体遥操参考。手部驱动仅订阅左右 cmd；录制到命令不表示驱动已接受或执行。
