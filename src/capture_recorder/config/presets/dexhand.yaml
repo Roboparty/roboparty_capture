@@ -1,5 +1,0 @@
-/**:
-  ros__parameters:
-    topics:
-    - /dexhand_left/cmd
-    - /dexhand_right/cmd

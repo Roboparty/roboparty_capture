@@ -5,6 +5,7 @@ import datetime
 import json
 import os
 from pathlib import Path
+import re
 import signal
 import subprocess
 import threading
@@ -18,15 +19,12 @@ from ament_index_python.packages import get_package_share_directory
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from rclpy.task import Future
 import rosbag2_py
 from capture_recorder.msg import RecordingStatus
 from capture_recorder.srv import StartRecording, StopRecording
-
-TOPICS = ['/ego/left/image/compressed', '/ego/right/image/compressed', '/ego/imu',
-          '/joint_states', '/imu', '/action', '/tracking/current_reference',
-          '/dexhand_left/cmd', '/dexhand_right/cmd']
 
 
 def task_slug(value):
@@ -62,6 +60,18 @@ def atomic_json(path, value):
     temporary.replace(path)
 
 
+def transport_loss_report(path):
+    """Read the last native transport-loss report from a bounded log tail."""
+    with path.open('rb') as stream:
+        stream.seek(0, os.SEEK_END)
+        stream.seek(max(0, stream.tell() - 65536))
+        tail = stream.read().decode('utf-8', errors='replace')
+    reports = re.findall(
+        r'^\[WARN\] \[rosbag2_recorder\]: Number of messages lost on the transport layer: ([0-9]+)\s*$',
+        tail, re.MULTILINE)
+    return int(reports[-1]) if reports else None
+
+
 class Session:
     def __init__(self, request_id, path, metadata):
         self.request_id, self.path, self.metadata = request_id, path, metadata
@@ -83,11 +93,22 @@ class Recorder(Node):
     def __init__(self):
         super().__init__('recorder')
         share = Path(get_package_share_directory('capture_recorder'))
-        defaults = dict(output_dir='recordings/raw', preset='', topics=TOPICS, topic_prefix='', task='未命名', mock=False,
+        defaults = dict(output_dir='recordings/raw', preset='', task='未命名',
             max_cache_size=64*1024*1024, max_bag_size=0, max_bag_duration=0,
             storage_config_file=str(share / 'config/mcap.yaml'), qos_overrides_file='',
             metadata_file='', start_timeout=15.0, stop_timeout=30.0)
         self.config = {key: self.declare_parameter(key, value).value for key, value in defaults.items()}
+        self.declare_parameter('topics', Parameter.Type.STRING_ARRAY)
+        try:
+            topics = self.get_parameter('topics').value
+        except rclpy.exceptions.ParameterUninitializedException as exc:
+            raise ValueError('topics is required; choose a preset or provide an explicit topics list') from exc
+        if not topics or any(not t.startswith('/') or t == '/' for t in topics):
+            raise ValueError('topics must be a non-empty list of absolute ROS topic names')
+        self.config['topics'] = topics
+        self.topics = [self.resolve_topic_name(t) for t in topics]
+        if len(set(self.topics)) != len(self.topics):
+            raise ValueError('Duplicate topics are not allowed')
         if self.get_parameter('use_sim_time').value:
             raise ValueError('use_sim_time is not supported')
         if 'mcap' not in rosbag2_py.get_registered_writers():
@@ -99,15 +120,6 @@ class Recorder(Node):
         for key in ('start_timeout', 'stop_timeout'):
             if self.config[key] <= 0:
                 raise ValueError(key + ' must be positive')
-        prefix = self.config['topic_prefix'].rstrip('/')
-        if prefix and not prefix.startswith('/'):
-            raise ValueError('topic_prefix must be absolute')
-        topics = self.config['topics']
-        if not topics or any(not t.startswith('/') for t in topics):
-            raise ValueError('topics must be a non-empty list of absolute ROS topic names')
-        self.topics = [self.resolve_topic_name(prefix + t) for t in topics]
-        if len(set(self.topics)) != len(self.topics):
-            raise ValueError('Duplicate topics are not allowed')
         self.file_snapshots = {}
         for key in ('storage_config_file', 'qos_overrides_file'):
             if self.config[key]:
@@ -130,7 +142,9 @@ class Recorder(Node):
             depth=1, reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.create_timer(0.5, self.publish_status, callback_group=self.group)
-        self.get_logger().info('Native rosbag2 session manager ready; topics=' + str(self.topics))
+        self.get_logger().info(
+            f'录制管理已就绪，等待开始指令；预设={self.config["preset"] or "custom"}，'
+            f'输出目录={Path(self.config["output_dir"]).expanduser().resolve()}；话题={self.topics}')
 
     def complete(self, future):
         if not future.done():
@@ -165,12 +179,12 @@ class Recorder(Node):
                     token = uuid.uuid4().hex[:2]
                     name = slug + '_' + local.strftime('%Y%m%d_%H%M%S_') + token
                     path = Path(self.config['output_dir']).expanduser().resolve() / name
-                    metadata = dict(schema_version=4, session_id=name, request_id=request.request_id,
+                    metadata = dict(schema_version=5, session_id=name, request_id=request.request_id,
                         task_slug=slug, recorder_node_name='rosbag2_recorder',
                         task=task, result='unlabeled', status='starting',
                         timezone='Asia/Shanghai', utc_offset='+0800', local_start_time=local.isoformat(),
                         start_time_ns=time.time_ns(), recording_ready_time_ns=None, stop_time_ns=None,
-                        closed_time_ns=None, mock=self.config['mock'], storage_id='mcap',
+                        closed_time_ns=None, storage_id='mcap',
                         config=self.config, topics=self.topics, supplemental=self.extra,
                         timestamp_source='native rosbag2 recorder receive time; original message headers unchanged',
                         error='', message_counts={}, missing_topics=[])
@@ -239,8 +253,8 @@ class Recorder(Node):
                 session.path = reserve_session_directory(session.path)
                 directory_owned = True
                 session.metadata['session_id'] = session.path.name
+            self.get_logger().info(f'开始录制：{session.path.name}，话题数={len(self.topics)}')
             atomic_json(session.path / 'session.json', session.metadata)
-            atomic_json(session.path / 'config.json', self.config)
             node_name = session.metadata['recorder_node_name']
             command = ['ros2', 'bag', 'record',
                 '-s', 'mcap', '-o', str(session.path / 'bag'),
@@ -272,6 +286,7 @@ class Recorder(Node):
                 session.started = True
                 session.started_mono = time.monotonic()
                 self.state = 'recording'
+                self.get_logger().info(f'录制已就绪：{session.path.name}')
                 self.complete(session.start_done)
             while not session.stop_event.wait(0.1):
                 if session.process.poll() is not None:
@@ -279,6 +294,7 @@ class Recorder(Node):
         except Exception as exc:
             session.error = str(exc)
         finally:
+            self.get_logger().info(f'正在停止并保存：{session.path.name}')
             with self.lock:
                 self.state = 'saving'
                 session.metadata['status'] = 'saving'
@@ -305,12 +321,14 @@ class Recorder(Node):
                     session.error = session.error or str(exc)
             if log:
                 log.close()
+            counts_available = False
             try:
                 if not directory_owned:
                     raise RuntimeError('Session directory was not reserved')
                 info = rosbag2_py.Info().read_metadata(str(session.path / 'bag'), 'mcap')
                 session.counts = {item.topic_metadata.name: item.message_count for item in info.topics_with_message_count}
                 session.metadata['bag_duration_ns'] = info.duration.nanoseconds
+                counts_available = True
             except Exception as exc:
                 session.error = session.error or 'Cannot read finalized bag metadata: ' + str(exc)
             session.error = session.error or session.reason
@@ -324,11 +342,44 @@ class Recorder(Node):
             except Exception as exc:
                 session.error = 'Session metadata save failed: ' + str(exc)
                 session.success = False
+            self.log_result(session, counts_available, directory_owned)
             with self.lock:
                 self.active, self.last = None, session
                 self.error = session.error
                 self.state = 'idle' if session.success else 'error'
                 self.complete(session.stop_done)
+
+    def log_result(self, session, counts_available, directory_owned):
+        logger = self.get_logger()
+        if session.success:
+            logger.info(f'保存成功：{session.path.name}，录制时长={session.duration:.1f}秒，'
+                        f'消息数={sum(session.counts.values())}；目录={session.path}')
+        else:
+            stage = '录制未完整保存' if session.started else '未能开始录制'
+            logger.error(f'{stage}：{session.path.name}；原因={session.error}；'
+                         f'日志={session.path / "recorder.log"}（若已创建）')
+        if counts_available:
+            logger.info('最终消息数：' + '，'.join(
+                f'{topic}={session.counts.get(topic, 0)}' for topic in self.topics))
+            missing = session.metadata['missing_topics']
+            if missing:
+                logger.warning('以下话题未录到消息：' + '，'.join(missing))
+        else:
+            logger.warning('无法读取最终消息数，不能判断话题是否齐全')
+        if not directory_owned or session.process is None:
+            return
+        try:
+            lost = transport_loss_report(session.path / 'recorder.log')
+        except (OSError, ValueError) as exc:
+            logger.warning(f'无法读取传输层丢失报告：{exc}；请检查 recorder.log')
+            return
+        if lost is None:
+            logger.info('传输层丢失数未知：未找到可识别的原生报告，不代表零丢包')
+        elif lost:
+            logger.warning(f'原生 recorder 报告传输层丢失消息：{lost}；'
+                           '文件保存结果与数据完整性分别判断')
+        else:
+            logger.info('原生 recorder 报告传输层丢失消息：0（不代表整条采集链路零丢包）')
 
     def publish_status(self):
         with self.lock:

@@ -1,6 +1,5 @@
 /**:
   ros__parameters:
-    backend: orbbec
     serial: ""
     width: 1600
     height: 1300

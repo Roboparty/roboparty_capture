@@ -114,7 +114,6 @@ class EgoNode : public rclcpp::Node {
   }
 public:
   EgoNode() : Node("ego_driver") {
-    auto backend=declare_parameter<std::string>("backend","orbbec");
     ego::Config config;
     config.serial=declare_parameter<std::string>("serial","");
     config.width=declare_parameter<int>("width",1600);
@@ -134,14 +133,7 @@ public:
     if(get_parameter("use_sim_time").as_bool())
       throw std::invalid_argument("use_sim_time is unsupported: header stamps are host receipt time");
     capacity_=static_cast<size_t>(capacity);
-    if(backend=="mock") { source_=ego::make_mock(); }
-    else if(backend=="orbbec") {
-#ifdef EGO_WITH_ORBBEC
-      source_=ego::make_orbbec();
-#else
-      throw std::runtime_error("Rebuild with EGO_WITH_ORBBEC=ON for hardware access");
-#endif
-    } else throw std::invalid_argument("backend must be orbbec or mock");
+    source_=ego::make_orbbec();
     auto qos=rclcpp::SensorDataQoS();
     for(size_t i=0;i<2;++i) {
       std::string side=i==0?"left":"right";
@@ -158,7 +150,7 @@ public:
       source_->start(config,[this](ego::Sample sample){enqueue(std::move(sample));},
         [this](std::string error){RCLCPP_ERROR_THROTTLE(get_logger(),*get_clock(),5000,"SDK callback: %s",error.c_str());});
     } catch(...) { stop(); throw; }
-    RCLCPP_INFO(get_logger(),"Started %s backend; header.stamp=host receipt; IMU paired by device timestamp",backend.c_str());
+    RCLCPP_INFO(get_logger(),"Started Orbbec source; header.stamp=host receipt; IMU paired by device timestamp");
   }
   ~EgoNode() override { stop(); }
 };

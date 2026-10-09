@@ -41,7 +41,6 @@ SDK 两路测量分别到达。节点按各流递增的设备时间戳匹配队�
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| backend | orbbec | orbbec 或 mock |
 | serial | 空 | 单设备自动选择，多设备需指定 |
 | width / height / fps | 1600 / 1300 / 30 | 双目 MJPEG 请求配置，设备需支持 |
 | imu_rate | 1000 | 400 或 1000 Hz |
@@ -49,8 +48,8 @@ SDK 两路测量分别到达。节点按各流递增的设备时间戳匹配队�
 | frame_prefix | ego_ | 各 frame_id 前缀 |
 | queue_capacity | 256 | 接收队列及每路 IMU 配对缓存的样本数上限 |
 
-参数只在启动时读取。回调接收与发布通过有界队列分离，满队列时丢弃新样本并报错。启动失败会停止已开的流；Ctrl+C 释放设备。模拟后端只验证接口，不模拟真实噪声或精确采样率。
+参数只在启动时读取。驱动固定使用 Orbbec SDK，不再提供后端选择。回调接收与发布通过有界队列分离，满队列时丢弃新样本并报错。启动失败会停止已开的流；Ctrl+C 释放设备。
 
 ## 旧接口迁移
 
-`ego_interfaces` 消息包、`*/sample`、`*/image_raw*` 和 `publish_raw` 参数已删除。订阅者改用上面的标准消息；更新自定义 YAML 时删除 publish_raw。升级后重新构建并在新终端 source `install/hardware/setup.bash` 或 `install/mock/setup.bash`，不要继续使用旧的根目录 install/setup.bash。
+`ego_interfaces` 消息包、`*/sample`、`*/image_raw*` 和 `publish_raw` 参数已删除。订阅者改用上面的标准消息；更新自定义 YAML 时删除 publish_raw 和 backend。升级后重新构建并在新终端 source `install/hardware/setup.bash`，不要继续使用旧的根目录 install/setup.bash。

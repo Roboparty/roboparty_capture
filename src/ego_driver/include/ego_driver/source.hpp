@@ -30,8 +30,5 @@ public:
   // Must stop/join callbacks before returning; must not throw.
   virtual void stop() noexcept = 0;
 };
-std::unique_ptr<Source> make_mock();
-#ifdef EGO_WITH_ORBBEC
 std::unique_ptr<Source> make_orbbec();
-#endif
 }

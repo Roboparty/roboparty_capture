@@ -72,7 +72,7 @@ ros2 launch capture_recorder recording.launch.py \
 | `no_ego` | 除 EGO 三路外的其余六路，保留机器人自身 `/imu` |
 | `ego` | 仅 EGO 左右图像和 IMU |
 
-其他预设与配置见[录制配置说明](docs/recording.md#录制真实话题与-yaml-配置)。
+自定义话题使用 `preset:=custom`，见[录制配置说明](docs/recording.md#录制真实话题与-yaml-配置)。
 
 ## 开始与停止录制
 
@@ -92,6 +92,8 @@ ros2 service call /recording/stop capture_recorder/srv/StopRecording '{}'
 ```
 
 数据保存在 `recordings/raw/<任务名_时间_后缀>/`。**先停止录制并等待保存成功，再 Ctrl+C 退出 launch。** 缺少话题不阻止录制，保存成功不表示九路数据全部齐全。
+
+launch 终端会打印录制开始、就绪、保存结果、路径和最终各路条数；缺失话题及原生 recorder 报告的传输丢失会单独提示。录制期间不持续刷屏，详细日志保存在每段 recorder.log。
 
 查看状态和已保存的数据：
 
@@ -127,5 +129,4 @@ ros2 run ego_driver read_samples.py --output sample_output --timeout 15 \
 
 - [配置与录制参考](docs/recording.md)：依赖、完整预设、服务接口、保存格式、回放与数据拷贝。
 - [驱动接口](docs/ego_driver.md)：消息、单位、时间和坐标约定。
-- [无设备模拟验证](docs/mock.md)：开发用取数、录制与回放。
-- [开发记录](docs/development.md)：设计决策与验证状态。目前已确认机器人 Jazzy 录制依赖可用，完整构建、取数与录制验收仍待完成。
+- [开发记录](docs/development.md)：设计决策与验证状态。当前源码已通过 ARM64 / Jazzy 板端构建与依赖检查，本版真机取数与录制验收仍待完成。

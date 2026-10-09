@@ -4,7 +4,7 @@
 
 - 阅读 `README.md` 获取用户安装和运行流程，阅读 `docs/development.md` 获取设计决策、实际验证状态与待办。
 - 修改消息、时间或坐标语义前，阅读 `docs/ego_driver.md`。
-- 这是 ROS 2 Humble 项目，目标是 Linux x86_64 与 ARM64。ARM64 SDK 可用不等于板端测试通过。
+- 当前部署目标为 Ubuntu 24.04 / ROS 2 Jazzy，架构为 Linux x86_64 与 ARM64；Humble 验证记录仅作为历史事实。ARM64 SDK 可用不等于板端测试通过。
 
 ## 实现边界
 
@@ -27,7 +27,7 @@
 
 - 优先用系统 Python 和项目构建脚本，不依赖本机 Conda。
 - 当前不保留 `tests/` 目录；手动验证按 README 同时运行驱动与 Python 取数示例。
-- 模拟构建：`./scripts/build.sh --mock`，之后 `source install/mock/setup.bash`。
+- 仅保留真实 SDK 构建：`./scripts/build.sh`，之后 `source install/hardware/setup.bash`；不再提供模拟数据源。
 - 设备后端或构建接口变化：有 SDK 时运行 `./scripts/build.sh`，验证真实 SDK 编译；没有设备或权限时如实说明不能完成真机测试。
 - 按改动范围选择检查，不把模拟数据说成真实设备结果，不把通过编译说成支持了所有平台。
 
